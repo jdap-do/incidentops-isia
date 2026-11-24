@@ -1,0 +1,190 @@
+<context>
+<lsp_context symbol="evaluate_sla_status">
+  <!-- 1. Definiciones de Tipos y Pol├¡ticas (LSP Hover / Type Definition) -->
+# [LSP textDocument/hover type] src\models.py:12
+class SLARule:
+    """Define el acuerdo de nivel de servicio (SLA) para un nivel de severidad."""
+
+    severity: SeverityLevel
+    max_resolution_minutes: int
+    operates_24x7: bool
+    escalation_threshold_ratio: float = 0.75
+
+# [LSP textDocument/hover type] src\models.py:22
+class Incident:
+    """Representa un incidente registrado en la plataforma IncidentOps."""
+
+    incident_id: str
+    title: str
+    component: str
+    severity: SeverityLevel
+    status: IncidentStatus
+    created_at: datetime
+    resolved_at: Optional[datetime] = None
+
+# [LSP textDocument/hover type] src\models.py:35
+class SLAEvaluation:
+    """Resultado determinista de la evaluaci├│n de SLA de un incidente."""
+
+    incident_id: str
+    severity: SeverityLevel
+    elapsed_minutes: int
+    allowed_minutes: int
+    remaining_minutes: int
+    is_breached: bool
+    requires_escalation: bool
+
+# [LSP textDocument/hover type] src\models.py:48
+class TriageResult:
+    """Resultado del triaje determinista.
+
+    consistency_ratio se conserva por compatibilidad; su valor predeterminado
+    no mide consultas independientes, confianza ni exactitud del clasificador.
+    """
+
+    incident_id: str
+    severity: SeverityLevel
+    component: str
+    rationale: str
+    consistency_ratio: float = 1.0
+    recommended_team: str = "Backend-Core"
+    duplicate_group_key: str = "unknown:unclassified"
+
+# [LSP textDocument/hover symbol] src\sla_calculator.py:17
+SLA_POLICY_TABLE: Dict[SeverityLevel, SLARule] = {
+    "P0": SLARule(severity="P0", max_resolution_minutes=60, operates_24x7=True),
+    "P1": SLARule(severity="P1", max_resolution_minutes=240, operates_24x7=True),
+    "P2": SLARule(severity="P2", max_resolution_minutes=480, operates_24x7=False),
+    "P3": SLARule(severity="P3", max_resolution_minutes=1440, operates_24x7=False),
+}
+
+  <!-- 2. Definici├│n Exacta del S├¡mbolo (LSP GoToDefinition) -->
+# [LSP textDocument/definition] src\sla_calculator.py:25
+def get_sla_rule_for_severity(severity: SeverityLevel) -> SLARule:
+    """Obtiene la regla de SLA aplicable a una severidad validada contra la tabla."""
+    if severity not in SLA_POLICY_TABLE:
+        raise ValueError(f"Severidad no v├ílida: {severity}")
+    return SLA_POLICY_TABLE[severity]
+
+# [LSP textDocument/definition] src\sla_calculator.py:32
+def evaluate_sla_status(incident: Incident, reference_time: datetime) -> SLAEvaluation:
+    """Eval├║a si un incidente ha incumplido su SLA o requiere escalamiento preventivo.
+
+    Args:
+        incident: Entidad del incidente a evaluar.
+        reference_time: Marca de tiempo actual o de cierre contra la cual medir.
+
+    Returns:
+        SLAEvaluation con los minutos transcurridos, restantes y banderas de estado.
+    """
+    rule = get_sla_rule_for_severity(incident.severity)
+    end_time = incident.resolved_at or reference_time
+
+    if end_time < incident.created_at:
+        raise ValueError("El tiempo de referencia no puede ser anterior a la creaci├│n.")
+
+    # TODO(week-1-taller): Cuando rule.operates_24x7 es False (P2 y P3), solo deben
+    # contabilizarse los minutos dentro del horario h├íbil (Lunes-Viernes 08:00-18:00).
+    delta_seconds = (end_time - incident.created_at).total_seconds()
+    elapsed_minutes = int(delta_seconds // 60)
+
+    remaining_minutes = rule.max_resolution_minutes - elapsed_minutes
+    is_breached = elapsed_minutes > rule.max_resolution_minutes
+
+    escalation_limit = int(rule.max_resolution_minutes * rule.escalation_threshold_ratio)
+    requires_escalation = (
+        incident.status != "RESOLVED"
+        and not is_breached
+        and elapsed_minutes >= escalation_limit
+    )
+
+    return SLAEvaluation(
+        incident_id=incident.incident_id,
+        severity=incident.severity,
+        elapsed_minutes=elapsed_minutes,
+        allowed_minutes=rule.max_resolution_minutes,
+        remaining_minutes=remaining_minutes,
+        is_breached=is_breached,
+        requires_escalation=requires_escalation,
+    )
+
+  <!-- 3. Referencias de Invocaci├│n en el Proyecto (LSP FindReferences) -->
+# [LSP textDocument/references] src\incident_repository.py:146
+  L145:             )
+  L146:             sla_eval = evaluate_sla_status(incident, reference_time=reference_time)
+  L147:             results.append(
+
+# [LSP textDocument/references] src\sla_calculator.py:87
+  L86:     monday_morning = datetime(2026, 11, 9, 9, 0, 0)
+  L87:     evaluation = evaluate_sla_status(sample_incident, reference_time=monday_morning)
+  L88: 
+</lsp_context>
+<adr_template>
+# ADR-000: [Título Corto de la Decisión Arquitectónica]
+
+- **Estado**: Propuesto | Aceptado | Reemplazado
+- **Fecha**: YYYY-MM-DD
+- **Autor(es)**: [Nombre del Ingeniero / Equipo]
+- **Componentes Afectados**: [`src/...`]
+
+---
+
+## 1. Contexto y Problema
+
+Describe el problema técnico o de negocio actual, las limitaciones del código existente (por ejemplo, latencia, consultas N+1, errores de cálculo de SLA o limitaciones de escalabilidad) y las restricciones del sistema (p. ej., mantener cero dependencias externas, seguridad contra inyección SQL, determinismo).
+
+---
+
+## 2. Opciones Consideradas
+
+1. **Opción A — [Nombre de la opción]**:
+   - *Ventajas*: ...
+   - *Desventajas*: ...
+2. **Opción B — [Nombre de la opción]**:
+   - *Ventajas*: ...
+   - *Desventajas*: ...
+3. **Opción C — [Nombre de la opción]**:
+   - *Ventajas*: ...
+   - *Desventajas*: ...
+
+---
+
+## 3. Decisión Arquitectónica
+
+Explica claramente cuál opción fue elegida y **por qué**. Incluye un diagrama **Mermaid** (`flowchart TD`, `flowchart LR`, `sequenceDiagram` o `stateDiagram-v2`) que ilustre el diseño aprobado.
+
+```mermaid
+flowchart LR
+    A["Solicitud / Evento"] --> B["Componente Refactorizado"]
+    B --> C["Resultado Validado"]
+```
+
+---
+
+## 4. Consecuencias e Impacto
+
+- **Positivas**: Mejoras en rendimiento, mantenibilidad, precisión o consumo de recursos.
+- **Negativas / Trade-offs**: Complejidad adicional asumida o límites conocidos de la solución.
+- **Verificación**: Cómo se comprobará empíricamente que la implementación cumple esta decisión.
+
+
+</adr_template>
+</context>
+<decision_summary>
+1. P0/P1 acumulan tiempo continuo; P2/P3 solo lunes a viernes de 08:00 a 18:00.
+2. Se suman las intersecciones diarias de la ventana hábil con el intervalo del incidente, en O(D).
+3. Se descarta contar minutos uno por uno por su costo y restar fines de semana sin recortar noches por su inexactitud.
+4. No se incorporan dependencias externas, festivos ni conversiones de zona horaria; se usan fechas locales naive coherentes.
+5. Se acumulan segundos y se convierten una sola vez a minutos enteros.
+6. El cierre usa resolved_at; un incidente resuelto no requiere escalamiento.
+7. Un intervalo invertido produce ValueError.
+8. El incumplimiento conserva la comparación estricta elapsed_minutes > allowed_minutes.
+9. El escalamiento se activa al alcanzar el 75 % y permanece activo después del vencimiento para incidentes abiertos.
+10. La verificación incluye fines de semana, creación fuera de horario, varios fines de semana, 24/7, límite exacto y resolución.
+</decision_summary>
+<constraints>
+Conservar API, tabla SLA y modelos. Usar solo biblioteca estándar. Redactar documentación en tercera persona. No afirmar pruebas ejecutadas si no se ejecutaron.
+</constraints>
+<task>
+Primero generar docs/adr/002-calculo-sla-horario-habil.md completo siguiendo la plantilla y con Mermaid flowchart TD válido. Luego entregar src/sla_calculator.py completo conforme al ADR, con auditoría ejecutable mediante python -m src.sla_calculator y aserciones de minutos y banderas. Casos: P2 viernes 2026-11-06 18:30 a lunes 2026-11-09 08:30=30; sábado 10:00 a lunes 09:00=60; viernes 17:00 a lunes 09:00=120; mismo intervalo P0=3840; P2 lunes 08:00 a 14:00=360 y escala; a 16:00=480 sin incumplimiento y escala; a 17:00=540 incumplido y escala; viernes 2026-11-06 17:00 a lunes 2026-11-16 09:00=3120; resuelto lunes 09:00 con creación viernes 17:00=120 sin escalamiento; intervalo invertido debe fallar. Entregar ambos archivos descargables. No modificar otros módulos.
+</task>
