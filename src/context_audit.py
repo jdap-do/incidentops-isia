@@ -13,7 +13,7 @@ import ast
 import json
 from pathlib import Path
 import re
-from typing import Dict, List, Tuple
+from typing import Dict, Iterator, List, Tuple
 
 try:
     import tiktoken
@@ -21,6 +21,12 @@ except ImportError:
     tiktoken = None  # type: ignore[assignment]
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _iter_python_files() -> Iterator[Path]:
+    """Itera los módulos Python del proyecto sin duplicados."""
+    for py_file in sorted(PROJECT_ROOT.glob("src/**/*.py")):
+        yield py_file
 
 
 def count_tokens(text: str, encoding_name: str = "o200k_base") -> Tuple[int, str]:
@@ -57,7 +63,14 @@ def collect_brute_force_context() -> Tuple[str, List[str]]:
     collected_parts: List[str] = []
     included_files: List[str] = []
 
-    for pattern in ("src/*.py", "data/*.json", "docs/adr/*.md"):
+    for pattern in (
+        "src/*.py",
+        "src/domain/*.py",
+        "src/application/*.py",
+        "src/adapters/**/*.py",
+        "data/*.json",
+        "docs/adr/*.md",
+    ):
         for filepath in sorted(PROJECT_ROOT.glob(pattern)):
             rel = filepath.relative_to(PROJECT_ROOT)
             content = filepath.read_text(encoding="utf-8")
@@ -72,7 +85,7 @@ def collect_grep_and_read_context(target_symbol: str) -> Tuple[str, List[str]]:
     collected_parts: List[str] = []
     matched_files: List[str] = []
 
-    for py_file in sorted((PROJECT_ROOT / "src").glob("*.py")):
+    for py_file in _iter_python_files():
         content = py_file.read_text(encoding="utf-8")
         if target_symbol in content or py_file.name == "models.py":
             rel = py_file.relative_to(PROJECT_ROOT)
@@ -95,7 +108,7 @@ def collect_lsp_semantic_context(target_symbol: str) -> str:
     references: List[str] = []
     related_types = {"Incident", "SLARule", "SLAEvaluation", "TriageResult", "SLA_POLICY_TABLE"}
 
-    for py_file in sorted((PROJECT_ROOT / "src").glob("*.py")):
+    for py_file in _iter_python_files():
         rel_path = py_file.relative_to(PROJECT_ROOT)
         source = py_file.read_text(encoding="utf-8")
         source_lines = source.splitlines()
