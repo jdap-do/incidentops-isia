@@ -5,7 +5,14 @@ from datetime import datetime
 from typing import cast
 
 from src.application.ports import IncidentRepositoryPort
-from src.domain.models import Incident, IncidentStatus, SeverityLevel, normalize_component
+from src.application.services import DuplicateIncidentId
+from src.domain.models import (
+    DUPLICATE_NOTIFICATION_STATUSES,
+    Incident,
+    IncidentStatus,
+    SeverityLevel,
+    normalize_component,
+)
 from src.domain.sla_calculator import SLA_POLICY_TABLE
 
 
@@ -34,18 +41,27 @@ class SQLiteIncidentRepository:
                 CREATE TABLE IF NOT EXISTS incidents (
                     incident_id TEXT PRIMARY KEY,
                     title TEXT NOT NULL,
+                    raw_text TEXT NOT NULL DEFAULT '',
                     component TEXT NOT NULL,
                     severity TEXT NOT NULL,
                     status TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    resolved_at TEXT
+                    resolved_at TEXT,
+                    duplicate_group_key TEXT NOT NULL DEFAULT 'unknown:unclassified'
                 )
                 """
             )
+            self._ensure_incident_columns()
             self._connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_incidents_component_status
                 ON incidents(component, status, incident_id)
+                """
+            )
+            self._connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_incidents_duplicate_status
+                ON incidents(duplicate_group_key, status, incident_id)
                 """
             )
             for rule in SLA_POLICY_TABLE.values():
@@ -58,32 +74,53 @@ class SQLiteIncidentRepository:
                     (rule.severity, rule.max_resolution_minutes, 1 if rule.operates_24x7 else 0),
                 )
 
-    def save_incident(self, incident: Incident) -> None:
-        """Inserta o reemplaza un incidente normalizando su componente."""
-        component = normalize_component(incident.component) or incident.component
-        with self._connection:
+    def _ensure_incident_columns(self) -> None:
+        existing = {
+            row["name"] for row in self._connection.execute("PRAGMA table_info(incidents)")
+        }
+        if "raw_text" not in existing:
             self._connection.execute(
-                """
-                INSERT OR REPLACE INTO incidents
-                (incident_id, title, component, severity, status, created_at, resolved_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    incident.incident_id,
-                    incident.title,
-                    component,
-                    incident.severity,
-                    incident.status,
-                    incident.created_at.isoformat(),
-                    incident.resolved_at.isoformat() if incident.resolved_at else None,
-                ),
+                "ALTER TABLE incidents ADD COLUMN raw_text TEXT NOT NULL DEFAULT ''"
             )
+        if "duplicate_group_key" not in existing:
+            self._connection.execute(
+                "ALTER TABLE incidents ADD COLUMN "
+                "duplicate_group_key TEXT NOT NULL DEFAULT 'unknown:unclassified'"
+            )
+
+    def save_incident(self, incident: Incident) -> None:
+        """Inserta un incidente normalizando su componente y sin reemplazar otro."""
+        component = normalize_component(incident.component) or incident.component
+        try:
+            with self._connection:
+                self._connection.execute(
+                    """
+                    INSERT INTO incidents
+                    (incident_id, title, raw_text, component, severity, status,
+                     created_at, resolved_at, duplicate_group_key)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        incident.incident_id,
+                        incident.title,
+                        incident.raw_text,
+                        component,
+                        incident.severity,
+                        incident.status,
+                        incident.created_at.isoformat(),
+                        incident.resolved_at.isoformat() if incident.resolved_at else None,
+                        incident.duplicate_group_key,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise DuplicateIncidentId(incident.incident_id) from exc
 
     def get_incident(self, incident_id: str) -> Incident | None:
         """Devuelve un incidente por ID o ``None`` si no existe."""
         cursor = self._connection.execute(
             """
-            SELECT incident_id, title, component, severity, status, created_at, resolved_at
+            SELECT incident_id, title, raw_text, component, severity, status,
+                   created_at, resolved_at, duplicate_group_key
             FROM incidents WHERE incident_id = ?
             """,
             (incident_id,),
@@ -94,33 +131,30 @@ class SQLiteIncidentRepository:
     def find_open_duplicates(
         self, incident: Incident, *, exclude_incident_id: str | None = None
     ) -> list[Incident]:
-        """Busca incidentes activos con componente y título equivalentes."""
-        component = normalize_component(incident.component) or incident.component
-        target_title = " ".join(incident.title.split()).casefold()
-        cursor = self._connection.execute(
-            """
-            SELECT incident_id, title, component, severity, status, created_at, resolved_at
+        """Busca equivalentes no resueltos por clave de duplicados."""
+        statuses = sorted(DUPLICATE_NOTIFICATION_STATUSES)
+        placeholders = ", ".join("?" for _ in statuses)
+        query = f"""
+            SELECT incident_id, title, raw_text, component, severity, status,
+                   created_at, resolved_at, duplicate_group_key
             FROM incidents
-            WHERE component = ? AND status IN (?, ?)
-            """,
-            (component, "OPEN", "IN_PROGRESS"),
-        )
-        matches: list[Incident] = []
-        for row in cursor.fetchall():
-            if exclude_incident_id is not None and row["incident_id"] == exclude_incident_id:
-                continue
-            if " ".join(row["title"].split()).casefold() != target_title:
-                continue
-            matches.append(self._row_to_incident(row))
-        return matches
+            WHERE duplicate_group_key = ? AND status IN ({placeholders})
+        """
+        parameters: list[str] = [incident.duplicate_group_key, *statuses]
+        if exclude_incident_id is not None:
+            query += " AND incident_id != ?"
+            parameters.append(exclude_incident_id)
+        query += " ORDER BY incident_id"
+        cursor = self._connection.execute(query, parameters)
+        return [self._row_to_incident(row) for row in cursor.fetchall()]
 
     def list_active_incidents(
         self, component_filter: str | None = None
     ) -> list[Incident]:
         """Obtiene activos con una sola consulta filtrada y join de políticas."""
         query = """
-            SELECT i.incident_id, i.title, i.component, i.severity,
-                   i.status, i.created_at, i.resolved_at
+            SELECT i.incident_id, i.title, i.raw_text, i.component, i.severity,
+                   i.status, i.created_at, i.resolved_at, i.duplicate_group_key
             FROM incidents AS i
             INNER JOIN sla_policies AS p ON p.severity = i.severity
             WHERE i.status IN (?, ?)
@@ -153,6 +187,8 @@ class SQLiteIncidentRepository:
             resolved_at=(
                 datetime.fromisoformat(row["resolved_at"]) if row["resolved_at"] else None
             ),
+            raw_text=row["raw_text"],
+            duplicate_group_key=row["duplicate_group_key"],
         )
 
 

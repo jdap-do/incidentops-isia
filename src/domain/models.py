@@ -6,6 +6,11 @@ from typing import Literal, Optional
 
 SeverityLevel = Literal["P0", "P1", "P2", "P3"]
 IncidentStatus = Literal["OPEN", "IN_PROGRESS", "ESCALATION_REQUIRED", "RESOLVED"]
+RegistrationStatus = Literal["OPEN", "IN_PROGRESS"]
+
+DUPLICATE_NOTIFICATION_STATUSES: frozenset[IncidentStatus] = frozenset(
+    {"OPEN", "IN_PROGRESS", "ESCALATION_REQUIRED"}
+)
 
 
 def normalize_component(value: str | None) -> str | None:
@@ -37,6 +42,8 @@ class Incident:
     status: IncidentStatus
     created_at: datetime
     resolved_at: Optional[datetime] = None
+    raw_text: str = ""
+    duplicate_group_key: str = "unknown:unclassified"
 
 
 @dataclass(frozen=True)

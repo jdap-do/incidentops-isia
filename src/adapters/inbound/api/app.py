@@ -1,4 +1,4 @@
-"""Aplicación FastAPI para el triaje manual y el resumen de incidentes."""
+"""Aplicación FastAPI para triaje, ciclo de vida de incidentes y SLA."""
 
 from dataclasses import asdict
 from datetime import datetime
@@ -7,15 +7,28 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from src.application.services import (
+    DuplicateIncidentId,
+    IncidentNotFound,
     IncidentService,
+    InvalidCreatedAt,
     InvalidReferenceTime,
+    InvalidRegistrationInput,
     InvalidTriageInput,
+    ReferenceTime,
+    RegistrationInput,
+    parse_created_at,
     parse_reference_time,
 )
 from src.bootstrap import build_incident_service
 from src.domain.models import SeverityLevel
 
-from .schemas import SummaryResponseModel
+from .schemas import (
+    IncidentSnapshotModel,
+    RegistrationRequestModel,
+    RegistrationResponseModel,
+    SLAStatusResponseModel,
+    SummaryResponseModel,
+)
 
 
 class TriageRequest(BaseModel):
@@ -64,6 +77,64 @@ def create_api_app(service: IncidentService) -> FastAPI:
         except InvalidReferenceTime as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return SummaryResponseModel(**asdict(result))
+
+    @application.post(
+        "/api/v1/incidents",
+        response_model=RegistrationResponseModel,
+        status_code=201,
+    )
+    def register_incident(request: RegistrationRequestModel) -> RegistrationResponseModel:
+        """Registra un incidente y devuelve la confirmación compartida."""
+        captured_at = datetime.now()
+        try:
+            created_at = parse_created_at(
+                request.created_at, resolved_now=captured_at
+            )
+            result = service.register_incident(
+                RegistrationInput(
+                    title=request.title,
+                    raw_text=request.raw_text,
+                    incident_id=request.incident_id,
+                    created_at=created_at,
+                    status=request.status,
+                ),
+                registered_at=captured_at,
+            )
+        except (InvalidRegistrationInput, InvalidCreatedAt) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except DuplicateIncidentId as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return RegistrationResponseModel(**asdict(result))
+
+    @application.get("/api/v1/incidents/{incident_id}", response_model=IncidentSnapshotModel)
+    def show_incident(incident_id: str) -> IncidentSnapshotModel:
+        """Devuelve la vista persistida de un incidente."""
+        try:
+            result = service.get_incident(incident_id)
+        except IncidentNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return IncidentSnapshotModel(**asdict(result))
+
+    @application.get(
+        "/api/v1/incidents/{incident_id}/sla",
+        response_model=SLAStatusResponseModel,
+    )
+    def incident_sla(
+        incident_id: str, reference_time: str | None = None
+    ) -> SLAStatusResponseModel:
+        """Captura o valida la referencia y devuelve el estado de SLA."""
+        try:
+            captured_at = datetime.now()
+            parsed_reference = parse_reference_time(
+                reference_time, resolved_now=captured_at
+            )
+            reference = ReferenceTime(raw=reference_time, value=parsed_reference)
+            result = service.get_incident_sla(incident_id, reference)
+        except IncidentNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except InvalidReferenceTime as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return SLAStatusResponseModel(**asdict(result))
 
     return application
 

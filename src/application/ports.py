@@ -9,7 +9,7 @@ class IncidentRepositoryPort(Protocol):
     """Contrato de persistencia que debe implementar todo adaptador de salida."""
 
     def save_incident(self, incident: Incident) -> None:
-        """Inserta o reemplaza un incidente por su identificador."""
+        """Inserta un incidente por su identificador sin sobrescribir otro."""
         ...
 
     def get_incident(self, incident_id: str) -> Incident | None:
@@ -19,7 +19,7 @@ class IncidentRepositoryPort(Protocol):
     def find_open_duplicates(
         self, incident: Incident, *, exclude_incident_id: str | None = None
     ) -> list[Incident]:
-        """Devuelve candidatos activos con el mismo componente y título."""
+        """Devuelve equivalentes no resueltos por ``duplicate_group_key``."""
         ...
 
     def list_active_incidents(
