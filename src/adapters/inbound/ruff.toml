@@ -1,0 +1,5 @@
+extend = "../../../pyproject.toml"
+src = ["../../.."]
+
+[lint.flake8-tidy-imports.extend-banned-api]
+"src.adapters.outbound".msg = "Inbound adapters must not import outbound adapters"

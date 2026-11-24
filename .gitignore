@@ -7,3 +7,10 @@ venv/
 *.db
 .pytest_cache/
 .vscode/
+dist/
+*.egg-info/
+.idea/
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp

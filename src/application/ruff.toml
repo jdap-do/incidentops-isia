@@ -1,0 +1,8 @@
+extend = "../../pyproject.toml"
+src = ["../.."]
+
+[lint.flake8-tidy-imports.extend-banned-api]
+"src.adapters".msg = "Application layer must not import adapters layer"
+"fastapi".msg = "Application layer must not import FastAPI"
+"typer".msg = "Application layer must not import Typer"
+"sqlite3".msg = "Application layer must not import sqlite3"

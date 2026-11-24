@@ -8,6 +8,14 @@ SeverityLevel = Literal["P0", "P1", "P2", "P3"]
 IncidentStatus = Literal["OPEN", "IN_PROGRESS", "ESCALATION_REQUIRED", "RESOLVED"]
 
 
+def normalize_component(value: str | None) -> str | None:
+    """Devuelve el nombre canónico de componente o ``None`` si está vacío."""
+    if value is None:
+        return None
+    normalized = " ".join(value.split()).casefold()
+    return normalized or None
+
+
 @dataclass(frozen=True)
 class SLARule:
     """Acuerdo de nivel de servicio para una severidad."""
@@ -29,6 +37,29 @@ class Incident:
     status: IncidentStatus
     created_at: datetime
     resolved_at: Optional[datetime] = None
+
+
+@dataclass(frozen=True)
+class ActiveIncidentDetail:
+    """Fila observable del detalle del resumen de incidentes activos."""
+
+    title: str
+    component: str
+    severity: SeverityLevel
+    status: Literal["OPEN", "IN_PROGRESS"]
+    elapsed_minutes: int
+    requires_escalation: bool
+
+
+@dataclass(frozen=True)
+class ActiveIncidentSummary:
+    """Resumen determinista compartido por REST y CLI."""
+
+    reference_time: str
+    component_filter: str | None
+    total_active: int
+    breached_count: int
+    details: list[ActiveIncidentDetail]
 
 
 @dataclass(frozen=True)

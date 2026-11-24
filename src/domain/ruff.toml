@@ -1,0 +1,6 @@
+extend = "../../pyproject.toml"
+src = ["../.."]
+
+[lint.flake8-tidy-imports.extend-banned-api]
+"src.application".msg = "Domain layer must not import application layer"
+"src.adapters".msg = "Domain layer must not import adapters layer"

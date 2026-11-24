@@ -1,5 +1,5 @@
-"""Adaptador REST inbound para el triaje manual."""
+"""Adaptador REST inbound para IncidentOps."""
 
-from .app import app
+from .app import app, create_api_app
 
-__all__ = ["app"]
+__all__ = ["app", "create_api_app"]
