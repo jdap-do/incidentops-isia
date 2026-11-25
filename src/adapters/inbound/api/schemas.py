@@ -7,6 +7,13 @@ from pydantic import BaseModel
 from src.domain.models import IncidentStatus, SeverityLevel
 
 
+class HealthResponseModel(BaseModel):
+    """Cuerpo exacto compartido por el endpoint de verificación."""
+
+    status: Literal["ok", "error"]
+    database: Literal["connected", "unavailable"]
+
+
 class RegistrationRequestModel(BaseModel):
     """Entrada opcional del alta; los campos obligatorios se validan en el servicio."""
 

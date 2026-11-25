@@ -4,6 +4,7 @@ from dataclasses import asdict
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from src.application.services import (
@@ -23,6 +24,7 @@ from src.bootstrap import build_incident_service
 from src.domain.models import SeverityLevel
 
 from .schemas import (
+    HealthResponseModel,
     IncidentSnapshotModel,
     RegistrationRequestModel,
     RegistrationResponseModel,
@@ -53,6 +55,15 @@ class TriageResponse(BaseModel):
 def create_api_app(service: IncidentService) -> FastAPI:
     """Construye una API con el servicio inyectado."""
     application = FastAPI(title="IncidentOps Triage API", version="0.1.0")
+
+    @application.get("/health", response_model=HealthResponseModel)
+    def health() -> JSONResponse:
+        """Devuelve el resultado exacto de la verificación compartida."""
+        result = service.check_database_health()
+        return JSONResponse(
+            status_code=200 if result.healthy else 503,
+            content={"status": result.status, "database": result.database},
+        )
 
     @application.post("/api/v1/incidents/triage", response_model=TriageResponse)
     def triage_incident(request: TriageRequest) -> TriageResponse:

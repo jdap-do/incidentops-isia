@@ -1,16 +1,11 @@
 <!--
 ## Sync Impact Report
-- Version change: unversioned template → 1.0.0
-- Modified principles: template principles 1–5 → I. Dominio determinista;
-  II. Un solo caso de uso para REST y CLI; III. Persistencia detrás de un puerto;
-  IV. SQLite como adaptador inicial; V. Criterios BDD y fronteras verificadas
-- Added sections: Arquitectura y tecnología; Flujo de trabajo y compuertas de calidad;
-  reglas de governance concretas
+- Version change: 1.0.0 → 1.1.0
+- Modified principles: IV. SQLite como adaptador inicial →
+  IV. Persistencia SQLite/PostgreSQL sin ORM
+- Added sections: none
 - Removed sections: none
-- Follow-up TODOs:
-  - TODO(RUFF_TOOLING): Ruff no está aún declarado ni configurado en `pyproject.toml`;
-    el cumplimiento de este principio requiere añadir la dependencia de desarrollo y
-    las reglas de fronteras de importación fuera de este cambio de constitución.
+- Follow-up TODOs: none
 -->
 # IncidentOps Constitution
 
@@ -56,15 +51,23 @@ concrete database or framework modules.
 Rationale: the port keeps use cases stable when the storage engine changes and
 prevents technology choices from leaking into the core.
 
-### IV. SQLite como adaptador inicial
+### IV. Persistencia SQLite/PostgreSQL sin ORM
 
-SQLite MUST be the initial outbound adapter implementing `IncidentRepositoryPort`.
-Only that adapter MAY import `sqlite3` or contain SQL schema and query details.
-Replacing the engine MUST be done by implementing the same port and MUST require
-an ADR; application and domain code MUST NOT change for that replacement.
+SQLite MUST remain the adapter for local development and automated tests.
+PostgreSQL MUST be the dedicated relational engine for container execution.
+Both engines MUST implement `IncidentRepositoryPort` with equivalent behavior and
+parameterized SQL; no ORM MAY be introduced. `psycopg[binary]` MUST be the
+PostgreSQL driver.
 
-Rationale: SQLite is sufficient for the current delivery, but it is a technology
-detail, not a dependency of the business rules.
+The composition root MUST select the outbound adapter from `DATABASE_URL`: absent,
+empty or `sqlite:` URLs select SQLite; `postgresql:` URLs select PostgreSQL; any
+unsupported scheme MUST be rejected. Only outbound adapters MAY import `sqlite3`,
+`psycopg` or contain SQL schema and query details. Domain and application code MUST
+NOT change when the selected engine changes.
+
+Rationale: ADR-004 accepts dual persistence without weakening the hexagonal
+boundaries of ADR-003. SQLite keeps local verification deterministic, while a
+dedicated PostgreSQL engine supports reproducible container execution.
 
 ### V. Criterios BDD y fronteras verificadas
 
@@ -80,8 +83,10 @@ Ruff turns the architectural constraints from prose into a repeatable check.
 ## Arquitectura y tecnología
 
 The technology baseline is Python 3.10+ managed with `uv`. REST uses FastAPI and
-Pydantic v2, CLI uses Typer, and the initial persistence adapter uses the standard
-library `sqlite3`. `pytest` and Ruff are required development tools.
+Pydantic v2, CLI uses Typer, and outbound adapters use either the standard library
+`sqlite3` or PostgreSQL through `psycopg[binary]`. `pytest` and Ruff are required
+development tools. Both persistence adapters MUST store timestamps as local naive
+ISO 8601 strings in `TEXT` columns to keep observable behavior identical.
 
 The mandatory layout is `src/domain/` for rules, `src/application/` for the
 service and repository port, and `src/adapters/inbound/` and `src/adapters/outbound/`
@@ -89,8 +94,9 @@ for inbound and outbound adapters. Dependencies MUST point toward the domain, th
 service or the port; concrete frameworks and database modules MUST stay in adapters.
 
 `docs/constitution.md` remains a preserved reference document. ADR-003 governs the
-hexagonal boundaries and ADR-002 governs the SLA calculation; changes to either
-MUST be decided in an ADR before this constitution is amended.
+hexagonal boundaries, ADR-002 governs the SLA calculation and ADR-004 governs the
+accepted dual persistence model; changes to any of them MUST be decided in an ADR
+before this constitution is amended.
 
 ## Flujo de trabajo y compuertas de calidad
 
@@ -124,4 +130,4 @@ Compliance review happens in every pull request: reviewers MUST verify the
 principles, require passing `pytest` and Ruff checks, and reject unjustified
 complexity or layer violations. Use `AGENTS.md` for runtime development guidance.
 
-**Version**: 1.0.0 | **Ratified**: 2026-11-24 | **Last Amended**: 2026-11-24
+**Version**: 1.1.0 | **Ratified**: 2026-11-24 | **Last Amended**: 2026-11-24

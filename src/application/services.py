@@ -5,7 +5,7 @@ import secrets
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import cast
+from typing import Literal, cast
 
 from src.application.ports import IncidentRepositoryPort
 from src.domain.models import (
@@ -150,6 +150,22 @@ class SLAStatusResult:
     requires_escalation: bool
 
 
+@dataclass(frozen=True)
+class HealthStatusResult:
+    """Resultado de disponibilidad compartido por REST y CLI."""
+
+    status: Literal["ok", "error"]
+    database: Literal["connected", "unavailable"]
+
+    @property
+    def healthy(self) -> bool:
+        return self.status == "ok" and self.database == "connected"
+
+
+HEALTH_SUCCESS = HealthStatusResult(status="ok", database="connected")
+HEALTH_FAILURE = HealthStatusResult(status="error", database="unavailable")
+
+
 def _is_naive(value: datetime) -> bool:
     return value.tzinfo is None and value.utcoffset() is None
 
@@ -215,6 +231,16 @@ class IncidentService:
 
     def __init__(self, repository: IncidentRepositoryPort | None = None) -> None:
         self._repository = repository
+
+    def check_database_health(self) -> HealthStatusResult:
+        """Devuelve el resultado compartido de disponibilidad de la base configurada."""
+        if self._repository is None:
+            return HEALTH_FAILURE
+        try:
+            available = self._repository.check_health()
+        except Exception:
+            return HEALTH_FAILURE
+        return HEALTH_SUCCESS if available else HEALTH_FAILURE
 
     def triage_incident(self, incident_id: str, raw_text: str) -> TriageResult:
         """Valida la entrada y delega la clasificación en el dominio."""

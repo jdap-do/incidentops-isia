@@ -208,8 +208,5 @@ def _resolve_database_path(database_url: str | None) -> str:
 
 
 def create_incident_repository(database_url: str | None = None) -> IncidentRepositoryPort:
-    """Crea el adaptador SQLite configurado por URL o variable de entorno."""
-    import os
-
-    selected_url = database_url if database_url is not None else os.environ.get("DATABASE_URL")
-    return SQLiteIncidentRepository(selected_url)
+    """Crea el adaptador SQLite configurado por URL o valor programático."""
+    return SQLiteIncidentRepository(database_url)

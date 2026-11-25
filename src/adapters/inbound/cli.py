@@ -30,6 +30,16 @@ def create_cli_app(service: IncidentService) -> typer.Typer:
     def main() -> None:
         """Punto de entrada CLI de IncidentOps."""
 
+    @application.command("health")
+    def health() -> None:
+        """Serializa el resultado compartido de disponibilidad de la base."""
+        result = service.check_database_health()
+        typer.echo(
+            json.dumps(asdict(result), ensure_ascii=False, separators=(",", ":"))
+        )
+        if not result.healthy:
+            raise typer.Exit(code=1)
+
     @application.command("triage")
     def triage(
         incident_id: str = typer.Option(..., "--incident-id"),
